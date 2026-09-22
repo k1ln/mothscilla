@@ -7,3 +7,9 @@ dist
 *.log
 .env
 .env.local
+
+# Local scratch file for staging deploy secrets before pushing them to
+# GitHub Actions via `gh secret set` — never meant to be committed.
+secrets.local.json
+secrets.local.*
+.secrets*
