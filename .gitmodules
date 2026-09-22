@@ -1,0 +1,3 @@
+[submodule "synflow"]
+	path = synflow
+	url = https://github.com/k1ln/synflow.git
