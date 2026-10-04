@@ -26,7 +26,7 @@ function EqThumb({ settings, color }: { settings: EqSettings; color: string }) {
 
 /** A horizontal FX chain editor (used at instrument / track / master level).
  *  Each insert is a device card with its Synflow-exported knobs. */
-export function FxBar({ label, color, fx, effects, onAdd, onRemove, onEdit, onKnob, onBrowse, compact }: {
+export function FxBar({ label, color, fx, effects, onAdd, onRemove, onEdit, onKnob, onBrowse, compact, renderGui }: {
   label: string;
   color?: string;
   fx: FxInsert[];
@@ -37,11 +37,13 @@ export function FxBar({ label, color, fx, effects, onAdd, onRemove, onEdit, onKn
   onKnob?: (index: number, nodeId: string, param: string, value: number | string) => void;
   onBrowse?: () => void;   // open the detailed plugin browser (library + VibeSynth gallery)
   compact?: boolean;
+  /** When given, .vstai plugins render their own GUI inline (stacked) instead of an 'Open plugin GUI' button. */
+  renderGui?: (index: number, insert: FxInsert) => React.ReactNode;
 }) {
   const [picking, setPicking] = useState(false);
   const c = color ?? 'var(--cat-fx)';
   return (
-    <div className={`fxbar ${compact ? 'compact' : ''}`}>
+    <div className={`fxbar ${compact ? 'compact' : ''} ${renderGui ? 'stacked' : ''}`}>
       <span className="fxbar-label" style={{ color: c }}>{label}</span>
       <div className="fxbar-row">
         {fx.length === 0 && <span className="fxbar-empty">no fx</span>}
@@ -56,11 +58,13 @@ export function FxBar({ label, color, fx, effects, onAdd, onRemove, onEdit, onKn
               <div className="fxdev-head">
                 <span className="fxdev-name" style={{ color: c }}>{ins.name}</span>
                 {isVstai && <span className="fxdev-ai" title="AI plugin (.vstai) — has its own GUI; not editable in Synflow">AI</span>}
-                <button className="fxbar-icon" title={isEq ? 'Open EQ' : isVstai ? 'Open plugin GUI' : 'Edit in Synflow'} onClick={() => onEdit(i)}><Pencil size={11} /></button>
+                {!(isVstai && renderGui) && <button className="fxbar-icon" title={isEq ? 'Open EQ' : isVstai ? 'Open plugin GUI' : 'Edit in Synflow'} onClick={() => onEdit(i)}><Pencil size={11} /></button>}
                 <button className="fxbar-icon" title="Remove" onClick={() => onRemove(i)}><X size={11} /></button>
               </div>
               {isEq && ins.eq && <button className="fxdev-eq-btn" onClick={() => onEdit(i)} title="Open EQ"><EqThumb settings={ins.eq} color={c} /></button>}
-              {isVstai && <button className="fxdev-gui-btn" onClick={() => onEdit(i)} title="Open the plugin's own GUI">Open plugin GUI</button>}
+              {isVstai && (renderGui
+                ? <div className="fxdev-gui-inline">{renderGui(i, ins)}</div>
+                : <button className="fxdev-gui-btn" onClick={() => onEdit(i)} title="Open the plugin's own GUI">Open plugin GUI</button>)}
               {knobs.length > 0 && (
                 <div className="fxdev-knobs">
                   {knobs.map((k) => (

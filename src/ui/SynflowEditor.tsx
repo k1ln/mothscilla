@@ -65,7 +65,7 @@ export function SynflowEditor({ flow, title, onSaved, onClose }: {
   }, [savedAt]);
 
   return (
-    <div className="syn-overlay" onClick={onClose}>
+    <div className="syn-overlay syn-full" onClick={onClose}>
       <div className="syn-modal" onClick={(e) => e.stopPropagation()}>
         <div className="syn-head">
           <span className="syn-dot" />

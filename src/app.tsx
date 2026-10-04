@@ -1245,6 +1245,28 @@ export function App() {
     openEffectEditor(entry);
   };
 
+  // Rename a pool instrument/drum (the on-disk file is keyed by id, so just rewrite it).
+  const renamePoolItem = (poolId: string, name: string) => {
+    const pool = projectRef.current.pool.find((p) => p.id === poolId); if (!pool) return;
+    mapPool(poolId, (pi) => ({ ...pi, name }));
+    const root = folderRef.current;
+    if (root) writeFlow(root, { group: 'instrument', id: pool.libId ?? pool.id, name, category: pool.kind === 'synth' ? 'Synths' : 'Drums', kind: pool.kind === 'synth' ? 'piano' : 'step', flow: { ...pool.flow, customUi: pool.customUi ?? pool.flow.customUi } }).catch((e) => console.warn('[Mothscilla] rename instrument failed', e));
+  };
+  // Rename a library effect, and the display name on every insert that uses it.
+  const renameEffect = (effectId: string, name: string) => {
+    const e = library.find((x) => x.id === effectId && x.group === 'effect'); if (!e) return;
+    setLibrary((lib) => lib.map((x) => (x.id === effectId && x.group === 'effect' ? { ...x, name } : x)));
+    const ren = (fx: FxInsert[]) => fx.map((f) => (f.fxId === effectId ? { ...f, name } : f));
+    setProject((p) => ({
+      ...p, masterFx: ren(p.masterFx),
+      pool: p.pool.map((pi) => (pi.fx ? { ...pi, fx: ren(pi.fx) } : pi)),
+      buses: (p.buses ?? []).map((b) => ({ ...b, fx: ren(b.fx) })),
+      tracks: p.tracks.map((t) => ({ ...t, fx: ren(t.fx), uses: t.uses.map((u) => ({ ...u, fx: ren(u.fx) })) })),
+    }));
+    const root = folderRef.current;
+    if (root) writeFlow(root, { group: 'effect', id: effectId, name, category: e.category, flow: e.flow }).catch((er) => console.warn('[Mothscilla] rename effect failed', er));
+  };
+
   // Remove an instrument/drum from the pool: drop its uses from every track,
   // tear down its engines, and close its panel.
   const removePoolItem = (poolId: string) => {
@@ -1319,32 +1341,80 @@ export function App() {
   // ── .vstai FX GUI: locate an insert anywhere in the project and route its own
   //    HTML GUI to the right live chain (params, sample uploads) + persistence. ──
   const [vstaiFxGui, setVstaiFxGui] = useState<null | { insert: FxInsert }>(null);
-  const locateInsert = (insertId: string): null | { chain: () => FxChain | undefined; index: number; patch: (fn: (f: FxInsert) => FxInsert) => void } => {
+  const locateInsert = (insertId: string): null | { chains: () => (FxChain | undefined)[]; index: number; list: FxInsert[]; patch: (fn: (f: FxInsert) => FxInsert) => void } => {
     const p = projectRef.current;
     const m = p.masterFx.findIndex((f) => f.id === insertId);
-    if (m >= 0) return { chain: () => mixerRef.current?.masterChain, index: m, patch: (fn) => setProject((x) => ({ ...x, masterFx: x.masterFx.map((f, j) => (j === m ? fn(f) : f)) })) };
+    if (m >= 0) return { chains: () => [mixerRef.current?.masterChain], index: m, list: p.masterFx, patch: (fn) => setProject((x) => ({ ...x, masterFx: x.masterFx.map((f, j) => (j === m ? fn(f) : f)) })) };
     for (const t of p.tracks) {
       const i = t.fx.findIndex((f) => f.id === insertId);
-      if (i >= 0) return { chain: () => mixerRef.current?.trackChain(t.id), index: i, patch: (fn) => mapTrack(t.id, (x) => ({ ...x, fx: x.fx.map((f, j) => (j === i ? fn(f) : f)) })) };
+      if (i >= 0) return { chains: () => [mixerRef.current?.trackChain(t.id)], index: i, list: t.fx, patch: (fn) => mapTrack(t.id, (x) => ({ ...x, fx: x.fx.map((f, j) => (j === i ? fn(f) : f)) })) };
       for (const u of t.uses) {
         const j = u.fx.findIndex((f) => f.id === insertId);
-        if (j >= 0) return { chain: () => mixerRef.current?.useChain(u.id), index: j, patch: (fn) => mapUse(u.id, (x) => ({ ...x, fx: x.fx.map((f, k) => (k === j ? fn(f) : f)) })) };
+        if (j >= 0) return { chains: () => [mixerRef.current?.useChain(u.id)], index: j, list: u.fx, patch: (fn) => mapUse(u.id, (x) => ({ ...x, fx: x.fx.map((f, k) => (k === j ? fn(f) : f)) })) };
       }
+    }
+    // Instrument-general FX (pool item): one chain per use of the instrument + the live page's chain.
+    for (const pi of p.pool) {
+      const i = (pi.fx ?? []).findIndex((f) => f.id === insertId);
+      if (i >= 0) return {
+        chains: () => [...usesOfPool(pi.id).map((u) => mixerRef.current?.usePoolChain(u.id)), liveFxRef.current.get(pi.id)], index: i, list: pi.fx ?? [],
+        patch: (fn) => mapPool(pi.id, (x) => ({ ...x, fx: (x.fx ?? []).map((f, j) => (j === i ? fn(f) : f)) })),
+      };
     }
     for (const b of p.buses ?? []) {
       const i = b.fx.findIndex((f) => f.id === insertId);
-      if (i >= 0) return { chain: () => mixerRef.current?.busChain(b.id), index: i, patch: (fn) => mapBus(b.id, (x) => ({ ...x, fx: x.fx.map((f, j) => (j === i ? fn(f) : f)) })) };
+      if (i >= 0) return { chains: () => [mixerRef.current?.busChain(b.id)], index: i, list: b.fx, patch: (fn) => mapBus(b.id, (x) => ({ ...x, fx: x.fx.map((f, j) => (j === i ? fn(f) : f)) })) };
     }
     return null;
   };
   const vstaiFxParam = (insert: FxInsert, index: number, value: number) => {
     const loc = locateInsert(insert.id); if (!loc) return;
-    loc.chain()?.setParam(loc.index, 'vstai', `param${index}`, value);                       // live
+    for (const c of loc.chains()) c?.setParam(loc.index, 'vstai', `param${index}`, value);                       // live
     loc.patch((f) => ({ ...f, flow: f.flow ? setFlowParam(f.flow, 'vstai', `param${index}`, value) : f.flow }));  // persist
   };
   const vstaiFxSample = (insert: FxInsert, msg: { channels: number; frames: number; rate: number; data: Float32Array }) => {
     const loc = locateInsert(insert.id); if (!loc) return;
-    loc.chain()?.post(loc.index, 'vstai', { type: 'sample', ...msg }, [msg.data.buffer]);
+    // each chain gets its own copy: a transferred buffer is detached after the first post
+    loc.chains().forEach((c, k, all) => c?.post(loc.index, 'vstai', { type: 'sample', ...msg, data: k < all.length - 1 ? msg.data.slice() : msg.data }, [k < all.length - 1 ? undefined : msg.data.buffer].filter(Boolean) as ArrayBuffer[]));
+  };
+
+  /** Replace an insert's flow wherever it lives (any chain) and rebuild the live chain(s). */
+  const applyInsertFlow = (insertId: string, flow: Flow) => {
+    const loc = locateInsert(insertId); if (!loc) return;
+    loc.patch((f) => ({ ...f, flow }));
+    const next = resolveFx(loc.list.map((f) => (f.id === insertId ? { ...f, flow } : f)));
+    for (const c of loc.chains()) c?.setChain(next);
+  };
+
+  /** "New effect in Synflow": register a starter effect in the library, hand the
+   *  insert to the caller's chain, and open it in a fresh Synflow session. */
+  const createEffectInsert = (addInsert: (ins: FxInsert) => void) => {
+    const id = uid('fx'); const name = 'New Effect';
+    const flow = cloneFlow(makeFilterFx({ type: 'lowpass', frequency: 1200 }));
+    setLibrary((lib) => [...lib, { id, name, category: 'Effects', group: 'effect', flow }]);
+    const root = folderRef.current;
+    if (root) writeFlow(root, { group: 'effect', id, name, category: 'Effects', flow }).catch((e) => console.warn('[Mothscilla] save effect failed', e));
+    const ins: FxInsert = { id: uid('fx'), fxId: id, name, flow };
+    addInsert(ins);
+    editFxFlow(ins, (f) => {
+      setLibrary((lib) => lib.map((x) => (x.id === id && x.group === 'effect' ? { ...x, flow: f } : x)));
+      applyInsertFlow(ins.id, f);
+    });
+  };
+
+  /** A .vstai FX insert's own GUI (modal for track/master/bus; inline under the instrument's FX). */
+  const renderVstaiFxGui = (insert: FxInsert, maxHeight: string = '62vh') => {
+    const html = vstaiHtmlOf(insert.flow);
+    const params = flowKnobs(insert.flow).map((k) => { const m = /^param(\d+)$/.exec(k.param); return m ? { index: +m[1], label: k.label, min: k.min, max: k.max } : null; }).filter((x): x is { index: number; label: string; min: number; max: number } => !!x);
+    const vd = insert.flow?.nodes?.find((n: any) => n.id === 'vstai')?.data;   // persisted knob positions
+    const values: Record<number, number> = {};
+    for (const p of params) { const v = vd?.[`param${p.index}`]; if (typeof v === 'number') values[p.index] = v; }
+    return html
+      ? <VstaiGui key={insert.id} html={html} maxHeight={maxHeight} params={params} values={values}
+          onParam={(i, v) => vstaiFxParam(insert, i, v)}
+          onSample={(m) => vstaiFxSample(insert, m)}
+          onAutomate={fxAutomateParam(insert)} />
+      : <div className="plg-none" style={{ padding: 16 }}>This plugin shipped without a GUI.</div>;
   };
 
   // ── Automation from a GUI/knob context menu: add a lane to the right track ──
@@ -1381,7 +1451,7 @@ export function App() {
         if (ui >= 0) { addParamLane(t.id, { scope: 'instrument', useId: u.id, fxIndex: ui, nodeId: 'vstai', param: `param${index}`, label, min, max }, mode); return; }
       }
     }
-    window.alert('This effect is on the master or a bus — lane automation is available for track and instrument effects.');
+    window.alert('This effect is on the master, a bus or the shared instrument chain — lane automation is available for track and per-track instrument effects.');
   };
 
   // Open the native graphical EQ. `updateLive` pushes edits to the live node(s)
@@ -2372,13 +2442,13 @@ export function App() {
 
   /** Stable identity for a browser pick: library entries use their id; gallery
    *  plugins use `vstai:<slug>` so the SAME plugin is always one shared pool item. */
-  const pickLibId = (pick: PluginPick): string | null =>
+  const pickLibId = (pick: Exclude<PluginPick, { kind: 'new' }>): string | null =>
     pick.kind === 'library' ? pick.entry.id : pick.kind === 'gallery' ? `vstai:${pick.item.slug}` : null;
 
   /** Resolve a pick to a pool item, REUSING an existing one (same identity) instead
    *  of duplicating — so "the same synth" is one entity across the pool and every
    *  track. Adds a new pool item (synchronously into projectRef) only when needed. */
-  const ensurePoolItem = (pick: PluginPick, kind: 'synth' | 'drum'): PoolItem | undefined => {
+  const ensurePoolItem = (pick: Exclude<PluginPick, { kind: 'new' }>, kind: 'synth' | 'drum'): PoolItem | undefined => {
     if (pick.kind === 'pool') return projectRef.current.pool.find((p) => p.id === pick.poolId);
     const libId = pickLibId(pick);
     const existing = libId ? projectRef.current.pool.find((p) => p.libId === libId && p.kind === kind) : undefined;
@@ -2388,6 +2458,19 @@ export function App() {
       : { id: uid('pool'), name: pick.item.name, libId: libId!, kind, flow: makeVstaiFlow(pick.doc, pick.item.name) };
     const next = { ...projectRef.current, pool: [...projectRef.current.pool, item] };
     projectRef.current = next; setProject(next);   // sync so a following add/dedup sees it
+    return item;
+  };
+
+  /** "New instrument in Synflow": a blank starter in the pool (and on disk), then its editor. */
+  const createNewInstrument = (kind: 'synth' | 'drum'): PoolItem => {
+    const id = uid('pool');
+    const name = kind === 'synth' ? 'New Synth' : 'New Drum';
+    const flow = cloneFlow(kind === 'synth' ? makeSynthVoice('sawtooth') : makeKick());
+    const item: PoolItem = { id, name, libId: id, kind, flow };
+    const next = { ...projectRef.current, pool: [...projectRef.current.pool, item] };
+    projectRef.current = next; setProject(next);
+    const root = folderRef.current;
+    if (root) writeFlow(root, { group: 'instrument', id, name, category: kind === 'synth' ? 'Synths' : 'Drums', kind: kind === 'synth' ? 'piano' : 'step', flow }).catch((e) => console.warn('[Mothscilla] save instrument failed', e));
     return item;
   };
 
@@ -2401,6 +2484,7 @@ export function App() {
       library: library.filter((e) => e.group === 'instrument' && ((e.kind === 'piano') === (kind === 'synth'))),
       onPick: async (pick) => {
         await ensureAudio();
+        if (pick.kind === 'new') { const fresh = createNewInstrument(kind); addUseOfPool(trackId, fresh); openInstrumentEditor(fresh); return; }
         const item = ensurePoolItem(pick, kind);
         if (item) addUseOfPool(trackId, item);
       },
@@ -2427,6 +2511,7 @@ export function App() {
       library: library.filter((e) => e.group === 'instrument' && ((e.kind === 'piano') === (kind === 'synth'))),
       onPick: async (pick) => {
         await ensureAudio();
+        if (pick.kind === 'new') { openInstrumentEditor(createNewInstrument(kind)); return; }
         ensurePoolItem(pick, kind);   // adds to the pool if new; reuses if already there
       },
     });
@@ -2438,7 +2523,8 @@ export function App() {
     setPluginBrowser({
       mode: 'effect', title, library: effects,
       onPick: (pick) => {
-        if (pick.kind === 'library') addInsert(fxInsert(pick.entry.id));
+        if (pick.kind === 'new') createEffectInsert(addInsert);
+        else if (pick.kind === 'library') addInsert(fxInsert(pick.entry.id));
         else if (pick.kind === 'gallery') addInsert({ id: uid('fx'), fxId: `vstai:${pick.item.slug}`, name: pick.item.name, flow: makeVstaiFlow(pick.doc, pick.item.name) });
       },
     });
@@ -2553,7 +2639,7 @@ export function App() {
       />
       {settingsOpen && <SettingsPanel settings={settings} onChange={updateSettings} onClose={() => setSettingsOpen(false)} />}
       <div className="workspace">
-        <Pool pool={project.pool} effects={effects} instrumentLib={library.filter((e) => e.group === 'instrument')} armed={armedPool} recordings={project.assets} previewKey={previewKey} onPreview={auditionAsset} onPlaceRecording={placeAssetOnTrack} onRemoveRecording={removeRecording} onRenameRecording={renameRecording} onImportRecording={importRecording} onOpenInstrument={openInstrument} onEditEffect={openEffectPage} onRemoveInstrument={removePoolItem} onRemoveEffect={removeEffect} onAddFromFolder={addFromFolder} onAddInstrument={addInstrumentToPool} onNewEffect={newEffect} onBrowsePool={openPoolBrowser} source={folder ? `disk · ${folder.name}` : 'built-in'} collapsed={!browserOpen} onToggleCollapsed={() => toggleBrowserOpen(!browserOpen)} />
+        <Pool pool={project.pool} effects={effects} instrumentLib={library.filter((e) => e.group === 'instrument')} armed={armedPool} recordings={project.assets} previewKey={previewKey} onPreview={auditionAsset} onPlaceRecording={placeAssetOnTrack} onRemoveRecording={removeRecording} onRenameRecording={renameRecording} onImportRecording={importRecording} onOpenInstrument={openInstrument} onEditEffect={openEffectPage} onRemoveInstrument={removePoolItem} onRemoveEffect={removeEffect} onRenameInstrument={renamePoolItem} onRenameEffect={renameEffect} onAddFromFolder={addFromFolder} onAddInstrument={addInstrumentToPool} onNewEffect={newEffect} onBrowsePool={openPoolBrowser} source={folder ? `disk · ${folder.name}` : 'built-in'} collapsed={!browserOpen} onToggleCollapsed={() => toggleBrowserOpen(!browserOpen)} />
         <div className="main">
           {recMon && <RecordingMonitor analyser={recMon.analyser} startMs={recMon.startMs} />}
           {view === 'tracks' && (
@@ -2658,6 +2744,7 @@ export function App() {
                   onGain={(v) => onLiveInstrumentGain(pool.id, v)}
                   onKnob={(nodeId, param, v) => onInstrumentKnob(pool.id, nodeId, param, v)}
                   onKnobRename={(nodeId, param, label) => onInstrumentKnobRename(pool.id, nodeId, param, label)}
+                  onRename={(n) => renamePoolItem(pool.id, n)}
                   onEdit={() => editInstrument(pool.id)}
                   customUi={pool.customUi ?? pool.flow.customUi} onEditUi={() => setCustomUiEdit(pool.id)}
                   onNoteOn={(m) => void liveNoteOn(pool.id, m)} onNoteOff={(m) => liveNoteOff(pool.id, m)} onHit={() => void liveDrumDown(pool.id)}
@@ -2667,6 +2754,7 @@ export function App() {
                   onFxAdd={(fxId) => onPoolFxAdd(pool.id, fxId)}
                   onFxBrowse={() => openEffectBrowser(`Add effect — ${pool.name}`, (ins) => { const next = [...(poolById(pool.id)?.fx ?? []), ins]; mapPool(pool.id, (pi) => ({ ...pi, fx: next })); rebuildPoolFx(pool.id, next); })}
                   onFxRemove={(i) => onPoolFxRemove(pool.id, i)}
+                  renderFxGui={(_i, ins) => renderVstaiFxGui(ins, '70vh')}
                   onFxEdit={(i) => onPoolFxEdit(pool.id, i)} onFxKnob={(i, nodeId, param, v) => onPoolFxKnob(pool.id, i, nodeId, param, v)}
                 />
               );
@@ -2844,19 +2932,7 @@ export function App() {
               <span className="plg-title">{vstaiFxGui.insert.name} <span className="fxdev-ai">AI</span></span>
               <button className="syn-close" onClick={() => setVstaiFxGui(null)} title="Close"><X size={16} /></button>
             </div>
-            {(() => {
-              const html = vstaiHtmlOf(vstaiFxGui.insert.flow);
-              const params = flowKnobs(vstaiFxGui.insert.flow).map((k) => { const m = /^param(\d+)$/.exec(k.param); return m ? { index: +m[1], label: k.label, min: k.min, max: k.max } : null; }).filter((x): x is { index: number; label: string; min: number; max: number } => !!x);
-              const vd = vstaiFxGui.insert.flow?.nodes?.find((n: any) => n.id === 'vstai')?.data;   // persisted knob positions
-              const values: Record<number, number> = {};
-              for (const p of params) { const v = vd?.[`param${p.index}`]; if (typeof v === 'number') values[p.index] = v; }
-              return html
-                ? <VstaiGui html={html} maxHeight="62vh" params={params} values={values}
-                    onParam={(i, v) => vstaiFxParam(vstaiFxGui.insert, i, v)}
-                    onSample={(m) => vstaiFxSample(vstaiFxGui.insert, m)}
-                    onAutomate={fxAutomateParam(vstaiFxGui.insert)} />
-                : <div className="plg-none" style={{ padding: 16 }}>This plugin shipped without a GUI.</div>;
-            })()}
+            {renderVstaiFxGui(vstaiFxGui.insert, '62vh')}
           </div>
         </div>
       )}

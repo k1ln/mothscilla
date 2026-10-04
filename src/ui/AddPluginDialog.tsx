@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { X, Search, Loader, Music2, Waves, Package, Globe } from 'lucide-react';
+import { X, Search, Loader, Music2, Waves, Package, Globe, Plus } from 'lucide-react';
 import type { LibraryEntry } from '../synflow/library';
 import type { PoolItem } from '../model/project';
 import { fetchGalleryIndex, downloadVstai, galleryShotUrl, type GalleryItem } from '../synflow/vstai';
@@ -8,7 +8,8 @@ import { fetchGalleryIndex, downloadVstai, galleryShotUrl, type GalleryItem } fr
 export type PluginPick =
   | { kind: 'pool'; poolId: string }                       // instrument already in the project
   | { kind: 'library'; entry: LibraryEntry }               // built-in / on-disk Synflow flow
-  | { kind: 'gallery'; item: GalleryItem; doc: any };      // downloaded VibeSynth .vstai
+  | { kind: 'gallery'; item: GalleryItem; doc: any }       // downloaded VibeSynth .vstai
+  | { kind: 'new' };                                       // blank starter, built from scratch in a new Synflow session
 
 /**
  * Plugin browser: a detailed popup for adding instruments or effects. Three
@@ -76,6 +77,13 @@ export function AddPluginDialog({ mode, title, library, pool, onPick, onClose }:
         </div>
 
         <div className="plg-body">
+          {source === 'synflow' && (
+            <button className="plg-new" onClick={() => { void onPick({ kind: 'new' }); onClose(); }}>
+              <Plus size={14} /> New {mode} in Synflow
+              <span className="plg-new-sub">Start from a blank starter and build it in a new Synflow session.</span>
+            </button>
+          )}
+
           {source === 'synflow' && poolItems.length > 0 && (
             <section className="plg-section">
               <h3 className="plg-sect"><Package size={12} /> In this project</h3>

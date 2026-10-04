@@ -41,8 +41,20 @@ export class FxChain {
     engine.rampParamTo(nodeId, param, v1, t1);
   }
 
-  /** Rebuild the whole chain from resolved inserts. */
-  async setChain(inserts: ResolvedFx[]): Promise<void> {
+  private chainQueue: Promise<void> = Promise.resolve();
+  private chainGen = 0;
+
+  /** Rebuild the whole chain from resolved inserts. Calls are serialised (overlapping
+   *  async rebuilds used to orphan engines → leaked Wasm instances → OOM) and a rebuild
+   *  superseded by a newer call is skipped before it instantiates anything. */
+  setChain(inserts: ResolvedFx[]): Promise<void> {
+    const gen = ++this.chainGen;
+    const run = this.chainQueue.then(() => (gen === this.chainGen ? this.buildChain(inserts) : undefined));
+    this.chainQueue = run.catch(() => {});
+    return run;
+  }
+
+  private async buildChain(inserts: ResolvedFx[]): Promise<void> {
     for (const f of this.fx) this.disposeInsert(f);
     this.fx = [];
     for (const ins of inserts) {

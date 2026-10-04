@@ -24,7 +24,7 @@ const fmtDur = (s: number) => `${Math.floor(s / 60)}:${String(Math.round(s % 60)
 export const DND_POOL_ITEM = 'application/x-synflow-pool-item';
 export const DND_RECORDING = 'application/x-synflow-recording';
 
-export function Pool({ pool, effects, instrumentLib, armed, recordings, previewKey, onPreview, onPlaceRecording, onRemoveRecording, onRenameRecording, onImportRecording, onOpenInstrument, onEditEffect, onRemoveInstrument, onRemoveEffect, onAddFromFolder, onAddInstrument, onNewEffect, onBrowsePool, source, collapsed, onToggleCollapsed }: {
+export function Pool({ pool, effects, instrumentLib, armed, recordings, previewKey, onPreview, onPlaceRecording, onRemoveRecording, onRenameRecording, onImportRecording, onOpenInstrument, onEditEffect, onRemoveInstrument, onRemoveEffect, onRenameInstrument, onRenameEffect, onAddFromFolder, onAddInstrument, onNewEffect, onBrowsePool, source, collapsed, onToggleCollapsed }: {
   pool: PoolItem[];
   effects: LibraryEntry[];
   instrumentLib: LibraryEntry[];   // the on-disk/bundled instruments you can add to the pool
@@ -35,6 +35,8 @@ export function Pool({ pool, effects, instrumentLib, armed, recordings, previewK
   onPlaceRecording: (assetId: string) => void;
   onRemoveRecording: (assetId: string) => void;
   onRenameRecording: (assetId: string, name: string) => void;
+  onRenameInstrument?: (poolId: string, name: string) => void;
+  onRenameEffect?: (effectId: string, name: string) => void;
   onImportRecording: () => void;   // pick a wav/mp3/… file from disk and add it as a recording
   onOpenInstrument: (poolId: string) => void;
   onEditEffect: (effectId: string) => void;
@@ -92,12 +94,12 @@ export function Pool({ pool, effects, instrumentLib, armed, recordings, previewK
     </div>
   );
 
-  const item = ({ id, name, color, live, onClick, onRemove, tag, title, dragPoolId }: { id: string; name: string; color: string; live?: boolean; onClick?: () => void; onRemove?: () => void; tag?: string; title?: string; dragPoolId?: string }) => (
+  const item = ({ id, name, color, live, onClick, onRemove, onRename, tag, title, dragPoolId }: { id: string; name: string; color: string; live?: boolean; onClick?: () => void; onRemove?: () => void; onRename?: (name: string) => void; tag?: string; title?: string; dragPoolId?: string }) => (
     <div key={id} className={`browser-item ${live ? 'live' : ''}`} onClick={onClick} title={title}
       draggable={!!dragPoolId}
       onDragStart={dragPoolId ? (e) => { e.dataTransfer.setData(DND_POOL_ITEM, dragPoolId); e.dataTransfer.effectAllowed = 'copy'; } : undefined}>
       <span className="bi-dot" style={{ background: color }} />
-      <span className="bi-name">{name}</span>
+      <span className="bi-name" onDoubleClick={onRename ? (e) => { e.stopPropagation(); const n = window.prompt('Name', name); if (n != null && n.trim()) onRename(n.trim()); } : undefined}>{name}</span>
       {live && <Radio size={11} className="bi-live" />}
       {tag && <span className="bi-kind">{tag}</span>}
       {onRemove && <button className="bi-del" title="Remove from project" onClick={(e) => { e.stopPropagation(); onRemove(); }}><X size={12} /></button>}
@@ -122,19 +124,19 @@ export function Pool({ pool, effects, instrumentLib, armed, recordings, previewK
       <div className="browser-list">
         {section({ name: 'Instruments', count: synths.length, onNew: () => (onBrowsePool ? onBrowsePool('synth') : setAdding((a) => (a === 'synth' ? null : 'synth'))), newTitle: 'Add an instrument — library or VibeSynth gallery', menu: addMenu('synth', synthCand), children: (
           <>
-            {synths.map((p) => item({ id: p.id, name: p.name, color: SECTION.Instruments.color, live: armed === p.id, tag: isVstaiFlow(p.flow) ? 'AI' : undefined, onClick: () => onOpenInstrument(p.id), onRemove: () => onRemoveInstrument(p.id), title: isVstaiFlow(p.flow) ? 'Open AI plugin (its own GUI) — drag onto the arrangement to add a track' : 'Open instrument (live + knobs) — drag onto the arrangement to add a track', dragPoolId: p.id }))}
+            {synths.map((p) => item({ id: p.id, name: p.name, color: SECTION.Instruments.color, live: armed === p.id, tag: isVstaiFlow(p.flow) ? 'AI' : undefined, onClick: () => onOpenInstrument(p.id), onRemove: () => onRemoveInstrument(p.id), onRename: onRenameInstrument ? (n) => onRenameInstrument(p.id, n) : undefined, title: isVstaiFlow(p.flow) ? 'Open AI plugin (its own GUI) — drag onto the arrangement to add a track' : 'Open instrument (live + knobs) — drag onto the arrangement to add a track · double-click the name to rename', dragPoolId: p.id }))}
             {synths.length === 0 && <div className="browser-empty">none — add with + (or a whole folder above)</div>}
           </>
         ) })}
         {section({ name: 'Drums', count: drums.length, onNew: () => (onBrowsePool ? onBrowsePool('drum') : setAdding((a) => (a === 'drum' ? null : 'drum'))), newTitle: 'Add a drum — library or VibeSynth gallery', menu: addMenu('drum', drumCand), children: (
           <>
-            {drums.map((p) => item({ id: p.id, name: p.name, color: SECTION.Drums.color, live: armed === p.id, tag: isVstaiFlow(p.flow) ? 'AI' : undefined, onClick: () => onOpenInstrument(p.id), onRemove: () => onRemoveInstrument(p.id), title: isVstaiFlow(p.flow) ? 'Open AI plugin (its own GUI) — drag onto the arrangement to add a track' : 'Open instrument (live + knobs) — drag onto the arrangement to add a track', dragPoolId: p.id }))}
+            {drums.map((p) => item({ id: p.id, name: p.name, color: SECTION.Drums.color, live: armed === p.id, tag: isVstaiFlow(p.flow) ? 'AI' : undefined, onClick: () => onOpenInstrument(p.id), onRemove: () => onRemoveInstrument(p.id), onRename: onRenameInstrument ? (n) => onRenameInstrument(p.id, n) : undefined, title: isVstaiFlow(p.flow) ? 'Open AI plugin (its own GUI) — drag onto the arrangement to add a track' : 'Open instrument (live + knobs) — drag onto the arrangement to add a track · double-click the name to rename', dragPoolId: p.id }))}
             {drums.length === 0 && <div className="browser-empty">none — add with + (or a whole folder above)</div>}
           </>
         ) })}
         {section({ name: 'Effects', count: effects.length, onNew: onNewEffect, newTitle: 'Create a new effect in Synflow', children: (
           <>
-            {effects.map((e) => item({ id: e.id, name: e.name, color: SECTION.Effects.color, tag: 'edit', onClick: () => onEditEffect(e.id), onRemove: () => onRemoveEffect(e.id), title: 'Edit effect in Synflow' }))}
+            {effects.map((e) => item({ id: e.id, name: e.name, color: SECTION.Effects.color, tag: 'edit', onClick: () => onEditEffect(e.id), onRemove: () => onRemoveEffect(e.id), onRename: onRenameEffect ? (n) => onRenameEffect(e.id, n) : undefined, title: 'Edit effect in Synflow · double-click the name to rename' }))}
             {effects.length === 0 && <div className="browser-empty">none — add from folder or +</div>}
           </>
         ) })}

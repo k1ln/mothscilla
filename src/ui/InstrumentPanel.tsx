@@ -20,7 +20,7 @@ const VISIBLE = 17;
  * / drum pad), tweak every knob exported from Synflow, set its gain, edit the flow.
  * Effects show only their knobs (no live play).
  */
-export function InstrumentPanel({ name, trackName, kind, flow, gain, onGain, onKnob, onKnobRename, onEdit, onBack, onNoteOn, onNoteOff, onHit, customUi, onEditUi, fx, effects, onFxAdd, onFxBrowse, onFxRemove, onFxEdit, onFxKnob, onVstaiSample, onAutomateParam }: {
+export function InstrumentPanel({ name, trackName, kind, flow, gain, onGain, onKnob, onKnobRename, onRename, onEdit, onBack, onNoteOn, onNoteOff, onHit, customUi, onEditUi, fx, effects, onFxAdd, onFxBrowse, onFxRemove, onFxEdit, onFxKnob, onVstaiSample, onAutomateParam, renderFxGui }: {
   name: string;
   /** Set only for a track-scoped session (Track Live): shows a badge so it's never
    *  mistaken for the shared/pool instrument, which every other track also hears. */
@@ -31,6 +31,7 @@ export function InstrumentPanel({ name, trackName, kind, flow, gain, onGain, onK
   onGain?: (v: number) => void;
   onKnob: (nodeId: string, param: string, value: number | string) => void;
   onKnobRename?: (nodeId: string, param: string, label: string) => void;
+  onRename?: (name: string) => void;   // rename the instrument (double-click the title)
   onEdit: () => void;
   onBack?: () => void;
   onNoteOn?: (midi: number) => void;
@@ -50,6 +51,8 @@ export function InstrumentPanel({ name, trackName, kind, flow, gain, onGain, onK
   onFxRemove?: (i: number) => void;
   onFxEdit?: (i: number) => void;
   onFxKnob?: (i: number, nodeId: string, param: string, value: number | string) => void;
+  /** Renders a .vstai FX insert's own GUI inline, stacked under the other FX. */
+  renderFxGui?: (i: number, insert: FxInsert) => React.ReactNode;
 }) {
   const isVstai = isVstaiFlow(flow);
   const vstaiHtml = isVstai ? vstaiHtmlOf(flow) : undefined;
@@ -121,7 +124,7 @@ export function InstrumentPanel({ name, trackName, kind, flow, gain, onGain, onK
       <div className="lp-head">
         {onBack && <button className="lp-back" onClick={onBack} title="Back"><ArrowLeft size={16} /> Back</button>}
         <span className="inst-dot" style={{ background: cat }} />
-        <span className="lp-name" style={{ color: cat }}>{name}</span>
+        <span className="lp-name" style={{ color: cat }} title={onRename ? 'Double-click to rename' : undefined} onDoubleClick={onRename ? () => { const n = window.prompt('Name', name); if (n != null && n.trim()) onRename(n.trim()); } : undefined}>{name}</span>
         <span className="inst-kind">{kind}</span>
         {trackName && (
           <span className="lp-track-badge" title={`Opened inside track "${trackName}" — this is that track's own copy; edits here are independent of the shared instrument and every other track`}>
@@ -198,7 +201,7 @@ export function InstrumentPanel({ name, trackName, kind, flow, gain, onGain, onK
           <div className="lp-group">
             <div className="lp-section-title">Instrument FX</div>
             <FxBar label="" color="var(--cat-mod)" fx={fx ?? []} effects={effects ?? []}
-              onAdd={onFxAdd} onBrowse={onFxBrowse} onRemove={(i) => onFxRemove?.(i)} onEdit={(i) => onFxEdit?.(i)} onKnob={onFxKnob} />
+              onAdd={onFxAdd} onBrowse={onFxBrowse} onRemove={(i) => onFxRemove?.(i)} onEdit={(i) => onFxEdit?.(i)} onKnob={onFxKnob} renderGui={renderFxGui} />
           </div>
         )}
 

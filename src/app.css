@@ -438,6 +438,8 @@ body.resizing-col, body.resizing-col * { cursor: col-resize !important; user-sel
 
 /* Embedded "Edit in Synflow" iframe panel */
 .syn-overlay { position: fixed; inset: 0; z-index: 2000; background: rgba(4,6,10,.62); display: flex; align-items: center; justify-content: center; padding: 28px; }
+.syn-full { padding: 0; }
+.syn-full .syn-modal { width: 100vw; height: 100vh; height: 100dvh; border: none; border-radius: 0; }
 .syn-modal { width: min(1280px, 96vw); height: min(820px, 92vh); display: flex; flex-direction: column; background: var(--surface-1, #0c0f16); border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border-strong)); border-radius: var(--r-md, 12px); overflow: hidden; }
 /* ── Export popup (MAW) ─────────────────────────────────────────────────── */
 .exp-modal { width: min(440px, 94vw); display: flex; flex-direction: column; background: var(--surface-1, #0c0f16); border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border-strong)); border-radius: var(--r-md, 12px); overflow: hidden; }
@@ -1509,3 +1511,16 @@ img, canvas { -webkit-user-drag: none; }
 .plg-tab:hover { color: var(--ink-1); }
 .plg-tab.on { color: var(--ink-1); border-bottom-color: var(--accent); }
 .plg-tabcount { margin-left: 4px; font-size: 10px; opacity: .6; }
+
+/* Instrument FX with inline .vstai GUIs: stack the devices vertically, full width. */
+.fxbar.stacked { flex-direction: column; align-items: stretch; gap: 0; width: 100%; min-width: 0; }
+.fxbar.stacked .fxbar-label:empty { display: none; }
+.fxbar.stacked .fxbar-row { flex-direction: column; align-items: stretch; width: 100%; min-width: 0; flex-wrap: nowrap; }
+.fxbar.stacked .fxbar-add { align-self: flex-start; }
+.fxbar.stacked .fxdev { width: 100%; }
+.fxdev-gui-inline { min-width: 0; width: 100%; }
+.fxdev-gui-inline .vstai-wrap { margin: 0; }
+
+.plg-new { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; width: 100%; margin-bottom: 14px; padding: 10px 12px; text-align: left; font: inherit; font-weight: 600; color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); border: 1px dashed color-mix(in srgb, var(--accent) 50%, transparent); border-radius: 8px; cursor: pointer; }
+.plg-new:hover { background: color-mix(in srgb, var(--accent) 18%, transparent); }
+.plg-new-sub { flex-basis: 100%; font-weight: 400; font-size: 11px; opacity: .7; color: inherit; }
